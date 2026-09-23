@@ -1,0 +1,9 @@
+{
+    "uuid": "faceauth-lockscreen@faceauth.local",
+    "name": "FaceAuth Lock Screen",
+    "description": "Shows a live FaceAuth face-scan indicator on the GNOME lock screen.",
+    "shell-version": ["45", "46", "47", "48"],
+    "session-modes": ["unlock-dialog", "user"],
+    "url": "https://github.com/NEESCHAL-3/FaceAuth",
+    "version-name": "1.0"
+}

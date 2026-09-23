@@ -1,0 +1,53 @@
+.faceauth-indicator {
+    spacing: 10px;
+}
+
+.faceauth-ring {
+    border-radius: 999px;
+    border: 2px solid #5aa8ff;
+    background-color: rgba(90, 168, 255, 0.12);
+}
+
+.faceauth-icon {
+    color: #eaf3ff;
+}
+
+.faceauth-label {
+    font-weight: bold;
+    font-size: 13pt;
+    color: #eaf3ff;
+    text-align: center;
+    max-width: 22em;
+}
+
+.faceauth-state-scanning .faceauth-ring {
+    border-color: #5aa8ff;
+    background-color: rgba(90, 168, 255, 0.12);
+}
+
+.faceauth-state-success .faceauth-ring {
+    border-color: #57e389;
+    background-color: rgba(87, 227, 137, 0.18);
+}
+
+.faceauth-state-success .faceauth-icon {
+    color: #57e389;
+}
+
+.faceauth-state-timeout .faceauth-ring {
+    border-color: #f8c953;
+    background-color: rgba(248, 201, 83, 0.14);
+}
+
+.faceauth-state-timeout .faceauth-icon {
+    color: #f8c953;
+}
+
+.faceauth-state-error .faceauth-ring {
+    border-color: #ed6a5e;
+    background-color: rgba(237, 106, 94, 0.14);
+}
+
+.faceauth-state-error .faceauth-icon {
+    color: #ed6a5e;
+}

@@ -13,11 +13,17 @@ def get_token_file(username):
     uid = get_user_uid(username)
     return os.path.join("/run/user", str(uid), "faceauth", "token")
 
-def check_token(username):
-    try:
-        if not username:
-            return False
+def check_token(username, now=None):
+    """
+    Return True if a fresh FaceAuth token exists for `username`, consuming it.
 
+    Any unexpected state (unknown user, wrong owner or permissions, malformed
+    or stale token) returns False so PAM falls through to the password.
+    """
+    if not username:
+        return False
+
+    try:
         expected_uid = get_user_uid(username)
         token_file = get_token_file(username)
 
@@ -36,13 +42,19 @@ def check_token(username):
             content = f.read().strip()
         token_user, timestamp = content.split(":")
         timestamp = float(timestamp)
-        age = time.time() - timestamp
-        if token_user == username and age < TOKEN_VALIDITY:
-            os.remove(token_file)
-            return True
+    except (KeyError, OSError, ValueError):
         return False
-    except:
+
+    age = (time.time() if now is None else now) - timestamp
+    # A negative age means a token from the future - never trust it.
+    if token_user != username or not 0 <= age < TOKEN_VALIDITY:
         return False
+
+    try:
+        os.remove(token_file)
+    except OSError:
+        return False
+    return True
 
 if __name__ == "__main__":
     username = os.environ.get("PAM_USER", os.environ.get("USER", ""))
