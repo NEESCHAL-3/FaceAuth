@@ -1,0 +1,10 @@
+[Unit]
+Description=Reapply the FaceAuth KDE lock screen overlay after Plasma updates
+
+[Path]
+# plasma-desktop updates replace this file and drop the FaceAuth overlay.
+PathChanged=/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/LockScreenUi.qml
+Unit=faceauth-kde-repair.service
+
+[Install]
+WantedBy=multi-user.target

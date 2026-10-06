@@ -1,0 +1,12 @@
+[Unit]
+Description=Reapply the FaceAuth KDE lock screen overlay
+# Also runs once at boot to catch updates made while the path unit was not watching.
+
+[Service]
+Type=oneshot
+# Give the package manager a moment to finish writing the lock screen files.
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/local/bin/faceauth-kde-patch apply
+
+[Install]
+WantedBy=multi-user.target
