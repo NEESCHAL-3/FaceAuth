@@ -64,14 +64,19 @@ if [ -d "$GNOME_EXT_DIR" ]; then
     echo "Removed GNOME lock screen extension."
 fi
 
-# Stop the auto-repair watcher first so it can't re-patch the file we clean up.
-sudo systemctl disable --now faceauth-kde-repair.path 2>/dev/null || true
-sudo systemctl disable faceauth-kde-repair.service 2>/dev/null || true
-sudo rm -f /etc/systemd/system/faceauth-kde-repair.path /etc/systemd/system/faceauth-kde-repair.service
-sudo systemctl daemon-reload
+# Same removal path as `faceauthctl disable-kde-ui` (covered by the KDE
+# integration test): stop the auto-repair watcher, then strip the patch.
+if [ -x /usr/local/bin/faceauthctl ] && /usr/local/bin/faceauthctl help 2>/dev/null | grep -q disable-kde-ui; then
+    /usr/local/bin/faceauthctl disable-kde-ui || warn "Could not cleanly remove the KDE lock screen overlay - check /usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/ manually."
+else
+    sudo systemctl disable --now faceauth-kde-repair.path 2>/dev/null || true
+    sudo systemctl disable faceauth-kde-repair.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/faceauth-kde-repair.path /etc/systemd/system/faceauth-kde-repair.service
+    sudo systemctl daemon-reload
 
-if [ -x /usr/local/bin/faceauth-kde-patch ]; then
-    sudo /usr/local/bin/faceauth-kde-patch remove || warn "Could not cleanly remove the KDE lock screen overlay - check /usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/ manually."
+    if [ -x /usr/local/bin/faceauth-kde-patch ]; then
+        sudo /usr/local/bin/faceauth-kde-patch remove || warn "Could not cleanly remove the KDE lock screen overlay - check /usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/ manually."
+    fi
 fi
 sudo rm -f /usr/local/bin/faceauth-kde-patch
 sudo rm -rf /usr/local/share/faceauth

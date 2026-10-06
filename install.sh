@@ -8,10 +8,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USERNAME=$(whoami)
 USER_ID=$(id -u)
 FORCE_ENROLL=0
+KDE_LOCKSCREEN_OVERLAY=0
 
-if [ "$1" = "--force-enroll" ] || [ "$1" = "--re-enroll" ]; then
-    FORCE_ENROLL=1
-fi
+for arg in "$@"; do
+    case "$arg" in
+        --force-enroll|--re-enroll)
+            FORCE_ENROLL=1
+            ;;
+        --kde-lockscreen-overlay)
+            KDE_LOCKSCREEN_OVERLAY=1
+            ;;
+        -h|--help)
+            echo "Usage: bash install.sh [--force-enroll] [--kde-lockscreen-overlay]"
+            echo ""
+            echo "  --force-enroll           re-detect the camera and enroll your face again"
+            echo "  --kde-lockscreen-overlay opt in to patching the system KDE Plasma 6 lock screen"
+            echo "                           to show the animated scan indicator (see README)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg (see: bash install.sh --help)"
+            exit 1
+            ;;
+    esac
+done
 
 if [ "$USER_ID" -eq 0 ]; then
     echo "ERROR: run install.sh as your normal user, not with sudo."
@@ -684,40 +704,48 @@ if [ "$DE" = "kde" ]; then
     elif [ ! -d "$KDE_OVERLAY_SRC" ]; then
         warn "kde-overlay assets not found next to install.sh - skipping lock screen overlay."
     else
-        sudo mkdir -p /usr/local/share/faceauth/kde-overlay
-        sudo cp "$KDE_OVERLAY_SRC/FaceAuthOsd.qml" /usr/local/share/faceauth/kde-overlay/FaceAuthOsd.qml
-        sudo cp "$KDE_OVERLAY_SRC/faceauth_kde_patch.py" /usr/local/bin/faceauth-kde-patch
-        sudo chmod +x /usr/local/bin/faceauth-kde-patch
+        # Stage the overlay assets. This does not touch any system file - the
+        # package-owned lock screen QML is only patched on explicit opt-in.
+        sudo install -d -m 755 /usr/local/share/faceauth/kde-overlay /usr/local/share/faceauth/systemd
+        sudo install -m 644 "$KDE_OVERLAY_SRC/FaceAuthOsd.qml" /usr/local/share/faceauth/kde-overlay/FaceAuthOsd.qml
+        sudo install -m 644 "$SCRIPT_DIR/systemd/faceauth-kde-repair.path" /usr/local/share/faceauth/systemd/faceauth-kde-repair.path
+        sudo install -m 644 "$SCRIPT_DIR/systemd/faceauth-kde-repair.service" /usr/local/share/faceauth/systemd/faceauth-kde-repair.service
+        sudo install -m 755 "$KDE_OVERLAY_SRC/faceauth_kde_patch.py" /usr/local/bin/faceauth-kde-patch
 
-        if sudo /usr/local/bin/faceauth-kde-patch apply; then
-            echo "KDE lock screen overlay installed."
+        KDE_PATCH_STATE=$(/usr/local/bin/faceauth-kde-patch status 2>/dev/null | cut -d' ' -f1)
+
+        if [ "$KDE_LOCKSCREEN_OVERLAY" = "1" ] || [ "$KDE_PATCH_STATE" = "patched" ]; then
+            if [ "$KDE_LOCKSCREEN_OVERLAY" != "1" ]; then
+                note "The KDE lock screen overlay was enabled by a previous install - keeping it."
+                note "To remove it: faceauthctl disable-kde-ui"
+            fi
+
+            if /usr/local/bin/faceauthctl enable-kde-ui; then
+                echo "KDE lock screen overlay enabled."
+            else
+                warn "KDE lock screen overlay could not be enabled. FaceAuth still works normally without it."
+                warn "Check with: faceauthctl doctor"
+            fi
         else
-            warn "KDE lock screen overlay could not be applied. FaceAuth still works normally without it."
-            warn "Check with: faceauthctl doctor"
-        fi
-
-        # Plasma updates replace the lock screen QML and silently drop the
-        # overlay; this path unit reapplies it whenever that file changes.
-        sudo install -m 644 "$SCRIPT_DIR/systemd/faceauth-kde-repair.path" /etc/systemd/system/faceauth-kde-repair.path
-        sudo install -m 644 "$SCRIPT_DIR/systemd/faceauth-kde-repair.service" /etc/systemd/system/faceauth-kde-repair.service
-        sudo systemctl daemon-reload
-
-        if sudo systemctl enable --now faceauth-kde-repair.path >/dev/null 2>&1 \
-            && sudo systemctl enable faceauth-kde-repair.service >/dev/null 2>&1; then
-            echo "Automatic overlay repair after Plasma updates enabled."
-        else
-            note "Could not enable automatic overlay repair. After Plasma updates, run: faceauthctl repair-kde-ui"
+            note "Face unlock works on KDE without any lock screen changes."
+            note "The animated scan indicator needs a patch to the system lock screen file (opt-in, see README):"
+            note "  faceauthctl enable-kde-ui"
         fi
     fi
 else
     GNOME_SHELL_VERSION=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1)
+    # Only install on Shell versions the extension declares (and has been
+    # tested with) - GNOME refuses to load it on any other version anyway.
+    GNOME_EXT_VERSIONS=$(python3 -c 'import json, sys; print(" ".join(json.load(open(sys.argv[1]))["shell-version"]))' \
+        "$GNOME_EXT_SRC/metadata.json" 2>/dev/null)
 
     if [ -z "$GNOME_SHELL_VERSION" ]; then
         note "gnome-shell not detected - skipping lock screen overlay extension."
-    elif [ "$GNOME_SHELL_VERSION" -lt 45 ]; then
-        note "GNOME Shell $GNOME_SHELL_VERSION detected - the lock screen overlay extension requires GNOME Shell 45+. Skipping."
-    elif [ ! -d "$GNOME_EXT_SRC" ]; then
+    elif [ ! -d "$GNOME_EXT_SRC" ] || [ -z "$GNOME_EXT_VERSIONS" ]; then
         warn "gnome-extension assets not found next to install.sh - skipping lock screen overlay."
+    elif ! printf ' %s ' "$GNOME_EXT_VERSIONS" | grep -q " $GNOME_SHELL_VERSION "; then
+        note "GNOME Shell $GNOME_SHELL_VERSION is not supported by the lock screen overlay extension (supports: $GNOME_EXT_VERSIONS). Skipping."
+        note "Face unlock itself works normally without it."
     else
         EXT_DEST="$HOME/.local/share/gnome-shell/extensions/$GNOME_EXT_UUID"
         mkdir -p "$(dirname "$EXT_DEST")"

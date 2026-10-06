@@ -67,6 +67,8 @@ faceauthctl test-camera
 faceauthctl set-camera <index>
 faceauthctl enroll
 faceauthctl check-match
+faceauthctl enable-kde-ui
+faceauthctl disable-kde-ui
 faceauthctl repair-kde-ui
 ~~~
 
@@ -78,11 +80,19 @@ faceauthctl repair-kde-ui
 
 While a scan is running, FaceAuth shows a live indicator (scanning ring, recognized/retry/error states) directly on the lock screen:
 
-- **GNOME**: installed as a GNOME Shell extension (`faceauth-lockscreen@faceauth.local`). Requires GNOME Shell 45+. If it isn't auto-enabled during install (no active graphical session yet), enable it after logging in with:
+- **GNOME**: installed as a GNOME Shell extension (`faceauth-lockscreen@faceauth.local`) on the GNOME Shell versions listed in its `metadata.json` (currently 45–48); the installer skips it on other versions. If it isn't auto-enabled during install (no active graphical session yet), enable it after logging in with:
   ~~~bash
   gnome-extensions enable faceauth-lockscreen@faceauth.local
   ~~~
-- **KDE Plasma**: Plasma 6 does not support swappable lock-screen themes, so the installer applies a small, reversible patch to the system lock screen QML to add the overlay (see `kde-overlay/faceauth_kde_patch.py` for exactly what it changes and how it's guarded). It only runs on Plasma 6. `plasma-desktop` package updates replace that file and drop the patch, so the installer also enables `faceauth-kde-repair.path`, which reapplies it whenever the file changes (and once at boot). If the animated overlay still disappears, reapply it with:
+- **KDE Plasma** (opt-in): face unlock works on KDE without any lock screen changes. The animated indicator needs a small patch to the system lock screen file `LockScreenUi.qml`, which is owned by the `plasma-desktop` package, so it is **off by default**. Enable it with:
+  ~~~bash
+  faceauthctl enable-kde-ui        # or: bash install.sh --kde-lockscreen-overlay
+  ~~~
+  and remove it (restoring the packaged file exactly) with:
+  ~~~bash
+  faceauthctl disable-kde-ui
+  ~~~
+  Why a patch and not a theme: since Plasma 6.1, kscreenlocker loads the lock screen only from the Plasma shell package (`org.kde.plasma.desktop`), not from Look and Feel (global theme) packages ([kscreenlocker commit ddbe4153](https://invent.kde.org/plasma/kscreenlocker/-/commit/ddbe4153)), so a theme's `contents/lockscreen` is ignored. The patch only adds one `Loader` next to KDE's own on-screen display; it refuses to touch a file that doesn't match the layout it was verified against (see `kde-overlay/faceauth_kde_patch.py`). Package updates replace the file and drop the patch, so enabling also installs `faceauth-kde-repair.path`, which reapplies it whenever the file changes (and once at boot). To reapply manually:
   ~~~bash
   faceauthctl repair-kde-ui
   ~~~
@@ -184,6 +194,12 @@ Run the tests (no camera needed):
 
 ~~~bash
 python3 -m unittest discover -s tests
+~~~
+
+The KDE lock screen overlay has an interactive integration test for a real Plasma 6 session. It locks your screen several times and checks: the stock lock screen as a baseline, enabling the overlay, password unlock, face unlock, a reinstall of the package that owns the lock screen file (the overlay is reapplied and face unlock still works), and removal (the file matches its package again). It writes a report with greeter logs and screenshots:
+
+~~~bash
+bash tests/integration/kde_lockscreen.sh
 ~~~
 
 `install.sh` copies `faceauth_common.py`, `faceauth_daemon.py`, `faceauth_pam.py`, and `faceauthctl.py` from the checkout as-is, so edit those files directly and re-run the installer to deploy.

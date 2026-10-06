@@ -17,6 +17,9 @@ import faceauth_common as common
 FACEAUTH_LINE = "auth sufficient pam_exec.so quiet /usr/local/bin/faceauth"
 GNOME_EXT_UUID = "faceauth-lockscreen@faceauth.local"
 KDE_REPAIR_UNIT = "faceauth-kde-repair.path"
+KDE_REPAIR_UNITS = ("faceauth-kde-repair.path", "faceauth-kde-repair.service")
+KDE_PATCH_BIN = "/usr/local/bin/faceauth-kde-patch"
+KDE_UNIT_SRC_DIR = Path("/usr/local/share/faceauth/systemd")
 
 def run(cmd):
     try:
@@ -256,7 +259,7 @@ def cmd_doctor():
     print(f"  {lock_screen_ui_status(desktop)}")
     if "kde" in desktop or "plasma" in desktop:
         code, out, _ = run(["systemctl", "is-enabled", KDE_REPAIR_UNIT])
-        print(f"  Auto-repair after Plasma updates: {out or 'not installed'}")
+        print(f"  Auto-repair after Plasma updates: {out if code == 0 else 'off (opt in with: faceauthctl enable-kde-ui)'}")
 
     print("")
     cmd_list_cameras()
@@ -266,21 +269,87 @@ def cmd_doctor():
         print("")
         match_check(username, int(cfg["ir_camera"]), float(cfg["tolerance"]))
 
+def require_kde_patch_bin():
+    if not Path(KDE_PATCH_BIN).exists():
+        print(f"FAILED: {KDE_PATCH_BIN} not found. Was FaceAuth installed on a KDE Plasma 6 system?")
+        return False
+    return True
+
+def run_patch(action):
+    code, out, err = run(["sudo", KDE_PATCH_BIN, action])
+    print(out or err)
+    return code == 0
+
 def cmd_repair_kde_ui():
     header("FaceAuth KDE Lock Screen Overlay Repair")
 
-    patch_bin = "/usr/local/bin/faceauth-kde-patch"
-    if not Path(patch_bin).exists():
-        print(f"FAILED: {patch_bin} not found. Was FaceAuth installed on a KDE Plasma 6 system?")
+    if not require_kde_patch_bin():
         return 1
 
-    code, out, err = run(["sudo", patch_bin, "apply"])
-    print(out or err)
-    if code != 0:
+    if not run_patch("apply"):
         print("Repair failed - see messages above.")
         return 1
 
     print("Done.")
+    return 0
+
+def cmd_enable_kde_ui():
+    """
+    Opt in to the KDE lock screen overlay: patch the package-owned lock
+    screen QML and install the unit that reapplies it after Plasma updates.
+    """
+    header("FaceAuth KDE Lock Screen Overlay")
+    print("This patches the system file LockScreenUi.qml (owned by plasma-desktop) to add")
+    print("the scan indicator. Plasma 6.1+ only loads the lock screen from that shell package,")
+    print("so there is no theme-based alternative. Undo any time with: faceauthctl disable-kde-ui")
+    print("")
+
+    if not require_kde_patch_bin():
+        return 1
+
+    if not run_patch("apply"):
+        print("Could not apply the overlay - nothing else was changed.")
+        return 1
+
+    for unit in KDE_REPAIR_UNITS:
+        src = KDE_UNIT_SRC_DIR / unit
+        if not src.exists():
+            print(f"WARNING: {src} not found - automatic repair after Plasma updates is not enabled.")
+            print("After Plasma updates, run: faceauthctl repair-kde-ui")
+            return 0
+        code, out, err = run(["sudo", "install", "-m", "644", str(src), f"/etc/systemd/system/{unit}"])
+        if code != 0:
+            print(f"WARNING: could not install {unit}: {err or out}")
+            return 0
+
+    run(["sudo", "systemctl", "daemon-reload"])
+    code_path, _, err_path = run(["sudo", "systemctl", "enable", "--now", KDE_REPAIR_UNITS[0]])
+    code_svc, _, err_svc = run(["sudo", "systemctl", "enable", KDE_REPAIR_UNITS[1]])
+
+    if code_path == 0 and code_svc == 0:
+        print("Automatic overlay repair after Plasma updates enabled.")
+    else:
+        print(f"WARNING: could not enable automatic repair: {err_path or err_svc}")
+        print("After Plasma updates, run: faceauthctl repair-kde-ui")
+    return 0
+
+def cmd_disable_kde_ui():
+    """Remove the KDE overlay and its auto-repair units, restoring the stock lock screen."""
+    header("FaceAuth KDE Lock Screen Overlay Removal")
+
+    # Stop the watcher first so it can't re-patch the file we clean up.
+    for unit in KDE_REPAIR_UNITS:
+        run(["sudo", "systemctl", "disable", "--now", unit])
+        run(["sudo", "rm", "-f", f"/etc/systemd/system/{unit}"])
+    run(["sudo", "systemctl", "daemon-reload"])
+    print("Automatic overlay repair disabled.")
+
+    if not Path(KDE_PATCH_BIN).exists():
+        return 0
+
+    if not run_patch("remove"):
+        print("Could not remove the overlay - see messages above.")
+        return 1
     return 0
 
 def load_config(username):
@@ -624,6 +693,8 @@ def usage():
     print("  faceauthctl set-camera <index>")
     print("  faceauthctl enroll [index] [--samples N] [--no-restart]")
     print("  faceauthctl check-match [index]")
+    print("  faceauthctl enable-kde-ui")
+    print("  faceauthctl disable-kde-ui")
     print("  faceauthctl repair-kde-ui")
     print("  faceauthctl version")
     print("")
@@ -662,6 +733,10 @@ def main():
         print(common.VERSION)
     elif cmd == "repair-kde-ui":
         return cmd_repair_kde_ui()
+    elif cmd == "enable-kde-ui":
+        return cmd_enable_kde_ui()
+    elif cmd == "disable-kde-ui":
+        return cmd_disable_kde_ui()
     elif cmd in ("help", "-h", "--help"):
         usage()
     else:
